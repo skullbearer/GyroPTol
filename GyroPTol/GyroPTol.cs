@@ -170,10 +170,10 @@ namespace IngameScript
             gyroPower = 1; // Assume 100% power until the use says otherwise.
             minAcc = 0;
             maxAcc = 0;
-            averageAcc = 0;
+            averageAcc = 0.1;
             minDec = 0;
             maxDec = 0;
-            averageDec = 0;
+            averageDec = 0.1;
             errTolDeg = 0;
             rAcc = 0;
             rVel = 0;
@@ -340,12 +340,14 @@ namespace IngameScript
             // Track a target velocity
             if (angVel != 0.0 && timeToTarget > timeToStop + timeStep)
             {
-                targetRVel = Math.Min(maxRVel, averageDec * timeToTarget);
+                targetRVel = Math.Max(maxRVel, Math.PI);
             }
             else if (timeToTarget < timeToStop)
                 targetRVel = 0;
             else
-                targetRVel = Math.Max(maxRVel, Math.PI);
+                targetRVel = Math.Min(maxRVel, averageDec * timeToTarget);
+
+
 
             errorVal = targetRVel * Math.Sign(angCommand) - rVel;
             if (double.IsNaN(errorVal)) throw new Exception("errorVal is NaN");
@@ -376,8 +378,11 @@ namespace IngameScript
             // PID+Feed Forward equation, complete. Outputs a target velocity command to the gyro adjusted for gainP.
             if (isAcceleration)
                 PIDout = gyroPower * ((gainPA * errorVal + targetRVel * Math.Sign(angCommand)) + gainIA * integralAComponent + gainDA * rAcc);
+            
             else
                 PIDout = gyroPower * ((gainPD * errorVal + targetRVel * Math.Sign(angCommand)) + gainID * integralDComponent + gainDD * rAcc);
+            
+
 
             // Jerk calculation
             jerkComponent = (rAcc - rAccLast) / timeStep;
@@ -392,7 +397,7 @@ namespace IngameScript
         {
             //double timeToStop = 0;
             // Derive the maximum P-gain to not grossly overshoot
-            if (Math.Abs(lastPIDout) > maxRVel - 0.001 && rVel != lastPIDout && Math.Abs(rAcc) > 0 && !goodAverage)
+            if (((wasAccel && Math.Abs(lastPIDout) > maxRVel - 0.001) || (!wasAccel && Math.Abs(lastPIDout) < 0.001)) && rVel != lastPIDout && Math.Abs(rAcc) > 0 && !goodAverage)
             {
                 if (!firstStep)
                 { // skip the first step, no acceleration data exists
@@ -412,7 +417,7 @@ namespace IngameScript
                 applyAverage(wasAccel, timeStep);
 
             }
-            if (goodAverage)
+            if (goodAverage && averageAcc > 0 && averageDec > 0)
             { // Attempts to dynamically correct for command tracking errors, should account for damping effects (roughly)
                 if (wasAccel)
                     gainPA = (targetRVel - Math.Abs(rVel)) * lastRAcc / averageAcc;
