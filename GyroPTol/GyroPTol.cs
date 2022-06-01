@@ -6,7 +6,6 @@ using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
 
-
 namespace IngameScript
 {
 
@@ -133,6 +132,11 @@ namespace IngameScript
         public double lastRAcc; // Angular acceleration the last calculation time (rad/s/s)
         public double lastRVel; // Angular velocidy (rad/s)
 
+        double angSpd;
+        double rAccAbs;
+        double lastPIDAbs;
+        int cmndDir;
+
         // Time elements
         double timeStepMin = 1.0 / 60.0; // This is the default for 1 tick
 
@@ -148,6 +152,8 @@ namespace IngameScript
         bool firstStep;
         public bool axisIsTuned;
         bool reverseIt;
+
+
 
 
         public GyroPTol()
@@ -296,10 +302,10 @@ namespace IngameScript
             bool isAcceleration;
             bool wasAcceleration;
 
-            double angSpd = Math.Abs(angVel);
-            double rAccAbs = Math.Abs(rAcc);
-            double lastPIDAbs = Math.Abs(lastPID);
-            int cmndDir = Math.Abs(angCommand);
+            angSpd = Math.Abs(angVel);
+            rAccAbs = Math.Abs(rAcc);
+            lastPIDAbs = Math.Abs(lastPIDout);
+            cmndDir = (int)Math.Abs(angCommand);
 
             // Check if we were accelerating last command, for integral
             lastErrorVal = lastPIDout - lastRVel;
