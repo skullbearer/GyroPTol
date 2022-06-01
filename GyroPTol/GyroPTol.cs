@@ -296,6 +296,11 @@ namespace IngameScript
             bool isAcceleration;
             bool wasAcceleration;
 
+            double angSpd = Math.Abs(angVel);
+            double rAccAbs = Math.Abs(rAcc);
+            double lastPIDAbs = Math.Abs(lastPID);
+            int cmndDir = Math.Abs(angCommand);
+
             // Check if we were accelerating last command, for integral
             lastErrorVal = lastPIDout - lastRVel;
             if (Math.Sign(lastErrorVal) == Math.Sign(lastAngCommand)) wasAcceleration = true;
@@ -317,42 +322,55 @@ namespace IngameScript
             // Derivative function, updated rAcc
             lastRAcc = rAcc;
             rAcc = (angVel - lastRVel) / timeStep;
+
+
             if (wasAcceleration)
             {
-                if (Math.Abs(rAcc) > maxAcc) maxAcc = Math.Abs(rAcc);
+                if (rAccAbs > maxAcc) maxAcc = rAccAbs;
                 else if (maxAcc < 0) maxAcc = Math.Abs(maxAcc);
-                if (Math.Abs(lastPIDout) > Math.PI - 0.01 && (Math.Abs(rAcc) < minAcc || minAcc == 0)) minAcc = Math.Abs(rAcc);
+                if (lastPIDAbs > Math.PI - 0.01 && (rAccAbs < minAcc || minAcc == 0)) minAcc = rAccAbs;
             }
             else
             {
-                if (Math.Abs(rAcc) > maxDec) maxAcc = Math.Abs(rAcc);
+                if (rAccAbs > maxDec) maxAcc = rAccAbs;
                 else if (maxAcc < 0) maxDec = Math.Abs(maxDec);
-                if (Math.Abs(lastPIDout) > Math.PI - 0.01 && (Math.Abs(rAcc) < minDec || minDec == 0)) minDec = Math.Abs(rAcc);
+                if (lastPIDAbs > Math.PI - 0.01 && (rAccAbs < minDec || minDec == 0)) minDec = rAccAbs;
             }
-            if (!double.IsNaN(averageDec) && averageDec != 0.0) // If we have a real averageDec
-                timeToStop = Math.Abs(rVel / averageDec);
-            else if (!double.IsNaN(averageAcc) && averageAcc != 0.0) // If we don't, but we have averageAcc
-                timeToStop = Math.Abs(rVel / averageAcc);
-            else timeToStop = 0; // If we have no acceleration averages then just make it 0 to make things move.
-            if (Math.Abs(angVel) > 0.0) // If we're moving
+
+            double _useAcc;
+            double _useDec;
+            if (maxAcc == 0 || maxDec == 0)
+            {
+                _useAcc = _useDec = Math.Max(4, averageAcc);
+            }
+            else
+            {
+                _useAcc = maxAcc;
+                _useDec = maxDec;
+            }
+
+            timeToStop = Math.Abs(rVel / _useDec);
+
+            if (angSpd > 0.001) // If we're moving
                 timeToTarget = Math.Abs(angCommand / angVel);
             else timeToTarget = 3600; // Otherwise set an arbitrary long time (1 hour)
             // Track a target velocity
-            if (angVel != 0.0 && timeToTarget > timeToStop + timeStep)
-            {
-                targetRVel = Math.Max(maxRVel, Math.PI);
-            }
-            else if (timeToTarget < timeToStop)
-                targetRVel = 0;
-            else
-                targetRVel = Math.Min(maxRVel, averageDec * timeToTarget);
+            if (angSpd > 0.001 && timeToTarget > timeToStop + timeStep)
+            { // Need to always accelerate a little harder than we intend in order to build up to the correct maxAcc
+                targetRVel = maxAcc * (timeToTarget + timeStepMin);
+            } // Need to always decelerate a little harder than we intend in order to build up to the correct minDec
+            else if (angSpd > 0.001)
+                targetRVel = maxDec * (timeToTarget - timeStepMin);
+            else  // Will only occur if we're either at angVel < 0.001
+                targetRVel = Math.Sign(rVel * angCommand) * maxAcc * timeStep * 1.1;
 
 
 
-            errorVal = targetRVel * Math.Sign(angCommand) - rVel;
+
+            errorVal = targetRVel * cmndDir - rVel;
             if (double.IsNaN(errorVal)) throw new Exception("errorVal is NaN");
 
-            if (Math.Sign(errorVal) == Math.Sign(angCommand)) isAcceleration = true;
+            if (Math.Sign(errorVal) == cmndDir) isAcceleration = true;
             else isAcceleration = false;
 
             // Integrator function
@@ -377,11 +395,11 @@ namespace IngameScript
 
             // PID+Feed Forward equation, complete. Outputs a target velocity command to the gyro adjusted for gainP.
             if (isAcceleration)
-                PIDout = gyroPower * ((gainPA * errorVal + targetRVel * Math.Sign(angCommand)) + gainIA * integralAComponent + gainDA * rAcc);
-            
+                PIDout = gyroPower * ((gainPA * errorVal + targetRVel * cmndDir) + gainIA * integralAComponent + gainDA * rAcc);
+
             else
-                PIDout = gyroPower * ((gainPD * errorVal + targetRVel * Math.Sign(angCommand)) + gainID * integralDComponent + gainDD * rAcc);
-            
+                PIDout = gyroPower * ((gainPD * errorVal + targetRVel * cmndDir) + gainID * integralDComponent + gainDD * rAcc);
+
 
 
             // Jerk calculation
@@ -397,7 +415,7 @@ namespace IngameScript
         {
             //double timeToStop = 0;
             // Derive the maximum P-gain to not grossly overshoot
-            if (((wasAccel && Math.Abs(lastPIDout) > maxRVel - 0.001) || (!wasAccel && Math.Abs(lastPIDout) < 0.001)) && rVel != lastPIDout && Math.Abs(rAcc) > 0 && !goodAverage)
+            if (rVel != lastPIDout && rAccAbs > 0 && !goodAverage)
             {
                 if (!firstStep)
                 { // skip the first step, no acceleration data exists
@@ -407,7 +425,7 @@ namespace IngameScript
                 }
                 else firstStep = false;
             }
-            if (Math.Abs(lastPIDout) > maxRVel - 0.001 && rVel != lastPIDout && Math.Abs(rAcc) > 0 && goodAverage)
+            if (rVel != lastPIDout && rAccAbs > 0 && goodAverage)
             { // Until testing shows otherwise, torque seems to scale with the command as well as power
 
                 // This is only calculated when we know we were accelerating with the maximum command
@@ -420,9 +438,9 @@ namespace IngameScript
             if (goodAverage && averageAcc > 0 && averageDec > 0)
             { // Attempts to dynamically correct for command tracking errors, should account for damping effects (roughly)
                 if (wasAccel)
-                    gainPA = (targetRVel - Math.Abs(rVel)) * lastRAcc / averageAcc;
+                    gainPA = (targetRVel - Math.Abs(rVel)) * lastRAcc / maxAcc;
                 else
-                    gainPD = (targetRVel - Math.Abs(rVel)) * lastRAcc / averageDec;
+                    gainPD = (targetRVel - Math.Abs(rVel)) * lastRAcc / maxDec;
             }
             return;
         }
@@ -430,9 +448,9 @@ namespace IngameScript
         void applyAverage(bool wasAccel, double timeStep)
         {
             if (wasAccel)
-                averageAcc = (averageAcc * timeAverage + Math.Abs(rAcc) * timeStep) / (timeAverage + timeStep);
+                averageAcc = (maxAcc * timeAverage + rAccAbs * timeStep) / (timeAverage + timeStep);
             else
-                averageDec = (averageDec * timeAverage + Math.Abs(rAcc) * timeStep) / (timeAverage + timeStep);
+                averageDec = (maxDec * timeAverage + rAccAbs * timeStep) / (timeAverage + timeStep);
         }
     }
 
