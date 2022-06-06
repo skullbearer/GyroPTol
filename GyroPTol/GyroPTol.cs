@@ -22,68 +22,9 @@ namespace IngameScript
 
 
         ////////////////////////// - Instructions - //////////////////////////////
-        // This has been setup in reverse to Whip's PID setup ON PURPOSE!
-        // Why? WHY DO THAT SKULLBEARER???
-        //
-        // Because they are different and I want to make you actually intentionally
-        // switch the code and not just copy-paste swap our PID classes. I'm not
-        // making it directly interchangeable as I don't want to update-lock to Whip's.
-        // 
-        // Why update the PID that Whiplash uses? Frankly too many people complain and don't
-        // fully understand the limits or capacities of PID. Also, frankly, this is Space Engineers
-        // and not a real world problem. We don't need I or D gain in a tuned system. You can
-        // use this to pull out tuned P gains and then plug them right into Whip's PID class methods
-        // without any issue, which is totally fine. If you need D gain, your P gain isn't properly
-        // tuned. If you need I gain, you have sub-grids, connected grids, or a real thruster
-        // physics mod that is causing you to turn under acceleration (ie gravity, or thrust).
-        //
-        // For that, you'll need my other class which isn't publicshed at the time of this writing.
-        //
-        // If you are flying a missile: WOBBLE IS FINE, you just want very little wobble.
-        // IN FACT!!!! Wobble means it's tracking around the target vector perfectly just correcting
-        // back and forth. Update10 is MORE THAN ENOUGH and if you really needed it like on a high
-        // speed server setting with extreme thrust, you could shift to Update1 ONLY JUST BEFORE IMPACT
-        //
-        // If you are flying a drone or ship: It can be legit that you don't want wobble.
-        // Particularly for long trips, the constant wobble will drain power and also can induce
-        // motion sickness. That's totally fine! In that case, we allow an error tolerance! Literally
-        // we just say that if we're 'close enough' then we stop trying to aim better. When the aim
-        // drifts too much (like as we get closer to out target GPS and the ship has been slightly
-        // aimed wrong and now is outside our tolerance allowance of angle mismatch) then we correct
-        // back to within the tolerance zone. This provides NO WOBBLE but is LESS ACCURATE.
-        //
-        // Summary:
-        // - Missile or Very Short Flight Needing Maximum Accuracy? - errTolDeg = 0
-        // - Drone or Long Flight Needing No Wobble? - errTolDeg > 0
-        //
-        //
-        // How to Use?
-        // This is just an example, you can use lists, individual floats for each axis, etc.
-        //
-        // GyroPTol xAxis = new GyroPTol();
-        // GyroPTol yAxis = new GyroPTol();
-        // GyroPTol zAxis = new GyroPTol();
-        // float toAngle[] = [0,0,0]; // In radiians, x,y,z
-        // float newCommand[] = [0,0,0]; // In rad/s, x,y,z
-        // int numTicks = 10; // This is for Update10
-        // float timeStep = numTicks/60.0;
-        //
-        // toAngle = yourStuffToDecideWhichAngleToTurn(); // Set all three axis
-        // newCommand = [xAxis.PIDRun(toAngle[0], timeStep)  // This is the X-axis command for your gyros
-        //               yAxis.PIDRun(toAngle[1], timeStep)  // This is the Y-axis command for your gyros
-        //               zAxis.PIDRun(toAngle[2], timeStep)]; // This is the Z-axis command for your gyros
-        // foreach(IMyGyro block in whateverYourGyroList<IMyGyro>IsCalled)
-        // {
-        //     //All your code to set the gyros at the correct axis
-        // }
-        // 
-        // What do I need to set?
-        //
-        // Well, if you change them from vanilla defaults, then be sure to set:
-        // - gyroPower
-        // - maxRVel
-        //
-        //
+
+
+
         ////////////////////////// - End Instructions - //////////////////////////
 
         // P gain elements
@@ -135,10 +76,11 @@ namespace IngameScript
         double angSpd;
         double rAccAbs;
         double lastPIDAbs;
-        int cmndDir;
+        double cmndDir;
 
         // Time elements
         double timeStepMin = 1.0 / 60.0; // This is the default for 1 tick
+        double timeToTarget;
 
         // Output tracker for user to error check
         public double lastPIDout;
@@ -153,9 +95,6 @@ namespace IngameScript
         public bool axisIsTuned;
         bool reverseIt;
 
-
-
-
         public GyroPTol()
         { // Constructor
             Reset();
@@ -164,123 +103,42 @@ namespace IngameScript
 
         public void Reset()
         { // Set to defaults
-            gainPA = gainPD = 0;
-            proportionalComponent = 0;
-            gainIA = gainID = 0;
-            integralAComponent = 0;
-            integralDComponent = 0;
-            gainDA = gainDD = 0;
-            jerkComponent = 0;
-            maxRVel = Math.PI; // Vanilla gyros have a Math.Pi/s maximum angular velocity hardcoded into the game
-            maxRVelObserved = 0;
-            gyroPower = 1; // Assume 100% power until the use says otherwise.
-            minAcc = 0;
-            maxAcc = 0;
-            averageAcc = 0.1;
-            minDec = 0;
-            maxDec = 0;
-            averageDec = 0.1;
-            errTolDeg = 0;
-            rAcc = 0;
-            rVel = 0;
-            lastRAcc = 0;
-            lastRVel = 0;
+            gainPA = gainPD = 0d;
+            proportionalComponent = 0d;
+            gainIA = gainID = 0d;
+            integralAComponent = 0d;
+            integralDComponent = 0d;
+            gainDA = gainDD = 0d;
+            jerkComponent = 0d;
+            gyroPower = 1.0; // Assume 100% power until the user says otherwise.
+            averageAcc = 1.0;
+            averageDec = 1.0;
+            errTolDeg = 0d;
+            rAcc = 0d;
+            rVel = 0d;
+            lastRAcc = 0d;
+            lastRVel = 0d;
 
 
-            lastPIDout = 0;
-            lastAngCommand = 0;
+            lastPIDout = 0d;
+            lastAngCommand = 0d;
             goodAverage = false;
             averageCnt = 0;
             averageCntTarget = 60; // 1s total time for a Update1, recommend at least 10.
-            timeAverage = 1; // Seconds during which the average accelerations are averaged over
+            timeAverage = 1.0; // Seconds during which the average accelerations are averaged over
 
             axisIsTuned = false;
             reverseIt = false;
         }
 
-
-        public double pTune(double angCommand, double angVel, double timeStep, double angTol = 0)
-        { // This will seek to tune your P-gain loop! CAUTION! Perform this in open space! Returns the gainP value when complete.
-
-            // We assume that the timeStep is an accurate time in seconds of game simulation time, which is almost impossible to tell for sure,
-            // but if you're using Update10 and we're actually 11 ticks here and there, it's still going to provide a decent tune.
-
-            // rAngle is the current angle on this axis (x, y, OR z, only 1 axis at a time) ins radiians, NOT DEGREES.
-
-            // To perform this test, start with your grid at either 0 rotation speed or a slight negative speed on your tuning axis, such as -1RPM.
-            // Command your gyros to all go to max speed, which is 30 RPM for vanilla gyros. Do this on ONE AXIS ONLY, the others should be 0 RPM.
-            // Keep in mind that the UI is in RPM and the script interface is in radiians/s (rad/s), so the script command is for Math.PI.
-            // In the same tick as starting the command, send the first call to this with your current angle rAngle and the expected timeStep
-            // before the next call.
-            //
-            // Keep calling this function every timeStep until it returns a non-null value. You don't even have to check the value, it will be stored in gainP,
-            // however if you check it, it's just the new gainP value.
-            //
-            // If there are no subgrids or real-thruster physics, then your loop is now tuned with gainI = gainD = 0;
-            //
-            // Continue to run until the axisIsTuned bool is true.
-            //
-            // The time it will take to tune and the amount your grid will rotate with depend on your timeStep * averageCntTarget and your grid's
-            // acceleration into rotation. For a very large grid, a slow update rate and a high averageCntTarget is a good combination as well.
-
-            double PIDout = 0;
-            bool wasAccel;
-            lastRAcc = rAcc;
-            lastRVel = rVel;
-            // Derivative function, updated rAcc
-            rAcc = (angVel - rVel) / timeStep;
-            // Update rVel to current.
-            rVel = angVel;
-            if (rVel > maxRVelObserved) maxRVelObserved = rVel;
-
-            if (axisIsTuned || firstStep)
-            {
-                Reset();
-            }
-
-
-            if (lastRVel >= maxRVel - 0.01 || averageCnt >= averageCntTarget / 2)
-            {
-                reverseIt = true;
-            }
-
-            if (Math.Abs(rVel) < maxRVel && averageCnt < averageCntTarget)
-            {
-                PIDout = Math.PI;
-                wasAccel = true;
-                if (reverseIt) PIDout *= -1.0;
-            }
-            else
-            {
-                wasAccel = true;
-                if (reverseIt && averageCnt > averageCntTarget)
-                {
-                    axisIsTuned = true;
-                    reverseIt = false;
-                    maxRVel = maxRVelObserved;
-                    PIDout = 0;
-                    wasAccel = false;
-                }
-                else if (reverseIt)
-                { // If we accelerate just so fast that we have insufficient averaging data, repeat the accelerations.
-                    reverseIt = false;
-                }
-            }
-
-            pAdjustment(PIDout, wasAccel, timeStep);
-
-            //if (firstStep) firstStep = false; // Now done inside pAdjustment()
-            return lastPIDout = PIDout;
-        }
-
-        public double PIDRunSelfAdjusting(double angCommand, double angVel, double timeStep, double angTol = -1.0, bool isSelfAdjusting = true)
+        public double PIDRunSelfAdjusting(double _angCommand, double _angVel, double _timeStep, double _angTol = -1.0, bool _isSelfAdjusting = true)
         {
-            if (double.IsNaN(angCommand)) throw new Exception("angCommand is NaN");
-            if (double.IsNaN(angVel)) throw new Exception("angVel is NaN");
-            if (double.IsNaN(timeStep)) throw new Exception("timeStep is NaN");
-            if (double.IsNaN(angTol)) throw new Exception("angTol is NaN");
-            if (angCommand == 0.0) return lastPIDout = 0.0;
-            if (timeStep < timeStepMin) throw new Exception("timeStep is smaller than the smallest possible value");
+            if (double.IsNaN(_angCommand)) throw new Exception("angCommand is NaN");
+            if (double.IsNaN(_angVel)) throw new Exception("angVel is NaN");
+            if (double.IsNaN(_timeStep)) throw new Exception("timeStep is NaN");
+            if (double.IsNaN(_angTol)) throw new Exception("angTol is NaN");
+            if (_angCommand == 0.0) return lastPIDout = 0.0;
+            if (_timeStep < timeStepMin) throw new Exception("timeStep is smaller than the smallest possible value");
             if (double.IsNaN(gyroPower)) throw new Exception("gyroPower is NaN");
             if (double.IsNaN(gainPA)) throw new Exception("gainPA is NaN");
             if (double.IsNaN(gainPD)) throw new Exception("gainPD is NaN");
@@ -291,172 +149,239 @@ namespace IngameScript
             if (double.IsNaN(rAcc)) throw new Exception("rAcc is NaN");
             if (double.IsNaN(rVel)) throw new Exception("rVel is NAN before update");
 
-            double PIDout = 0.0;
-            double rAccLast = rAcc;
-            double timeToStop;
-            double timeToTarget;
-            double targetRVel;
-            double errorVal;
-            double lastErrorVal;
+            double _PIDout = 0.0;
+            double _rAccLast = rAcc;
+            double _timeToStop;
+            double _timeToStopFuture;
+            double _stopRatePerTick;
+            double _timeToTarget;
+            double _timeToTargetFwd;
+            double _timeToTargetRev;
+            double _targetRVel;
+            double _errorVal;
+            double _lastErrorVal;
 
-            bool isAcceleration;
-            bool wasAcceleration;
+            bool _isAcceleration;
+            bool _wasAccel;
+            bool _isFwd;
 
-            angSpd = Math.Abs(angVel);
+            angSpd = Math.Abs(_angVel);
             rAccAbs = Math.Abs(rAcc);
             lastPIDAbs = Math.Abs(lastPIDout);
-            cmndDir = (int)Math.Abs(angCommand);
+            cmndDir = (double)Math.Sign(_angCommand);
+            _stopRatePerTick = timeStepMin / averageDec;
 
             // Check if we were accelerating last command, for integral
-            lastErrorVal = lastPIDout - lastRVel;
-            if (Math.Sign(lastErrorVal) == Math.Sign(lastAngCommand)) wasAcceleration = true;
-            else wasAcceleration = false;
+            _lastErrorVal = lastPIDout - lastRVel;
+            if (Math.Sign(_lastErrorVal) == Math.Sign(lastAngCommand)) _wasAccel = true;
+            else _wasAccel = false;
 
             // Update rVel to current.
             lastRVel = rVel;
-            rVel = angVel;
+            rVel = _angVel;
 
-            // Our self adjustment is based in part on maxRVel, make sure we catch it correctly
-            if (Math.Abs(rVel) > maxRVel) maxRVel = Math.Abs(rVel);
-            if (double.IsNaN(maxRVel)) throw new Exception("maxRVel is NaN");
-
-            if (angTol == -1.0) angTol = errTolDeg; // If it's never set, then use the stored value.
+            if (_angTol == -1.0) _angTol = errTolDeg; // If it's never set, then use the stored value.
 
             // errTolDeg cannot ever be less than zero, that is already perfect accuracy.
-            if (angTol < 0.0) angTol = 0.0;
+            if (_angTol < 0.0) _angTol = 0.0;
 
             // Derivative function, updated rAcc
             lastRAcc = rAcc;
-            rAcc = (angVel - lastRVel) / timeStep;
+            rAcc = (_angVel - lastRVel) / _timeStep;
 
+            double _useAcc = averageAcc;
+            double _useDec = averageDec;
 
-            if (wasAcceleration)
-            {
-                if (rAccAbs > maxAcc) maxAcc = rAccAbs;
-                else if (maxAcc < 0) maxAcc = Math.Abs(maxAcc);
-                if (lastPIDAbs > Math.PI - 0.01 && (rAccAbs < minAcc || minAcc == 0)) minAcc = rAccAbs;
+            if (rVel > _stopRatePerTick)
+            { // If we're moving faster than we can stop in just a single tick
+                // If we were going to start braking now
+                _timeToStop = Math.Abs(rVel / _useDec);
+                // If we are going to accelerate now
+                _timeToStopFuture = (Math.Abs(rVel + _timeStep / _useAcc) / _useDec)
             }
+            else if (rVel > 0.0001f)
+            { // If we're moving and can stop in a single tick
+                _timeToStop = timeStepMin;
+                _timeToStopFuture = 0;
+            }
+            else // If we're not moving
+            {
+                _timeToStop = 0;
+                _timeToStopFuture = 0;
+            }
+
+            timeToTarget(_angCommand, _angVel, out _timeToTargetFwd, out _timeToTargetRev);
+
+            // Set class parameter in case the user wants it
+            timeToTarget = Math.Min(_timeToTargetFwd, _timeToTargetRev);
+
+            if (_timeToTargetFwd > _timeToTargetRev)
+            { // Need to reverse direction!
+                _isFwd = false;
+            } // Don't reverse, keep on trucking!
             else
-            {
-                if (rAccAbs > maxDec) maxAcc = rAccAbs;
-                else if (maxAcc < 0) maxDec = Math.Abs(maxDec);
-                if (lastPIDAbs > Math.PI - 0.01 && (rAccAbs < minDec || minDec == 0)) minDec = rAccAbs;
-            }
+                _isFwd = true;
 
-            double _useAcc;
-            double _useDec;
-            if (maxAcc == 0 || maxDec == 0)
+            if (_isFwd)
             {
-                _useAcc = _useDec = Math.Max(4, averageAcc);
+                if (timeToTarget > _timeToStop + _timeStep)
+                    _isAcceleration = true;
+                else
+                    _isAcceleration = false;
             }
-            else
-            {
-                _useAcc = maxAcc;
-                _useDec = maxDec;
-            }
+            else // we're goint to stop, then go in reverse
+                _isAcceleration = false;
 
-            timeToStop = Math.Abs(rVel / _useDec);
-
-            if (angSpd > 0.001) // If we're moving
-                timeToTarget = Math.Abs(angCommand / angVel);
-            else timeToTarget = 3600; // Otherwise set an arbitrary long time (1 hour)
             // Track a target velocity
-            if (angSpd > 0.001 && timeToTarget > timeToStop + timeStep)
-            { // Need to always accelerate a little harder than we intend in order to build up to the correct maxAcc
-                targetRVel = maxAcc * (timeToTarget + timeStepMin);
-            } // Need to always decelerate a little harder than we intend in order to build up to the correct minDec
-            else if (angSpd > 0.001)
-                targetRVel = maxDec * (timeToTarget - timeStepMin);
-            else  // Will only occur if we're either at angVel < 0.001
-                targetRVel = Math.Sign(rVel * angCommand) * maxAcc * timeStep * 1.1;
+            if (_isAcceleration)
+                // Need to always set a speed slightly higher than we expect to achieve in order to maintain maximum accel
+                _targetRVel = averageAcc * (_timeStep + timeStepMin);
+            else if (_timeToStop < _timeToTarget + _timeStep)
+                // Need to always set a speed slightly lower than we expect to achieve in order to maintain maximum decel
+                _targetRVel = averageDec * (_timeStep - timeStepMin);
+            else// If we are coming to a final stop, don't be aggressive about it, go in by halves.
+                _targetRVel = Math.Sign(_angCommand) / _timeStep / 2.0;
 
-
-
-
-            errorVal = targetRVel * cmndDir - rVel;
-            if (double.IsNaN(errorVal)) throw new Exception("errorVal is NaN");
-
-            if (Math.Sign(errorVal) == cmndDir) isAcceleration = true;
-            else isAcceleration = false;
+            _errorVal = _targetRVel * cmndDir - rVel;
+            if (double.IsNaN(_errorVal)) throw new Exception("errorVal is NaN");
 
             // Integrator function
-            if (wasAcceleration)
+            if (_wasAccel)
             { // Integrate on acceleration
-                integralAComponent += errorVal * timeStep;
+                integralAComponent += _errorVal * _timeStep;
                 if (double.IsNaN(integralAComponent)) throw new Exception("integralAComponent is NaN");
             }
             else
             { // Integrate on deceleration
-                integralDComponent += errorVal * timeStep;
+                integralDComponent += _errorVal * _timeStep;
                 if (double.IsNaN(integralDComponent)) throw new Exception("integralDComponent is NaN");
             }
 
             // Adjust for remaining error not accounted for last step by adjusting the P gain for that.
-            if (isSelfAdjusting)
-            {
-                pAdjustment(targetRVel, wasAcceleration, timeStep);
-                // If it was the first step, we threw out the first acceleration data point
-                //if (firstStep) firstStep = false; // now done inside pAdjustment()
+            if (_isSelfAdjusting)
+            { // Apply the averaging functions
+                // Torque scales according to https://github.com/KeenSoftwareHouse/SpaceEngineers/blob/a109106fc0ded66bdd5da70e099646203c56550f/Sources/Sandbox.Game/Game/GameSystems/MyGridGyroSystem.cs
+                if (rAccAbs > 0.001)
+                {
+                    if (rVel <= lastPIDout - _stopRatePerTick && !goodAverage)
+                    { // If we hit our max acceleration last time...
+                        if (!firstStep)
+                        { // skip the first step, no acceleration data exists
+                            applyAverage(_wasAccel, _timeStep);
+                            if (averageCnt > averageCntTarget) goodAverage = true;
+                            averageCnt++;
+                        }
+                        else firstStep = false;
+                        gainPA = gainPD = 0.0;
+                    }
+                    else if (goodAverage)
+                    {
+                        // Specifically UpdateOverriddenGyros()
+                        applyAverage(_wasAccel _timeStep);
+                        pAdjustment(_targetRVel, _wasAccel, _timeStep);
+                    }
+                    else // If we didn't hit our max acceleration
+                    {
+                        applyAverageIncrease(_wasAccel);
+                        gainPA = gainPD = 0.0;
+                    }
+                }
             }
 
             // PID+Feed Forward equation, complete. Outputs a target velocity command to the gyro adjusted for gainP.
-            if (isAcceleration)
-                PIDout = gyroPower * ((gainPA * errorVal + targetRVel * cmndDir) + gainIA * integralAComponent + gainDA * rAcc);
-
+            if (_isAcceleration)
+                _PIDout = ((gainPA * _errorVal + _targetRVel * cmndDir) + gainIA * integralAComponent + gainDA * rAcc);
             else
-                PIDout = gyroPower * ((gainPD * errorVal + targetRVel * cmndDir) + gainID * integralDComponent + gainDD * rAcc);
-
-
+                _PIDout = ((gainPD * _errorVal + _targetRVel * cmndDir) + gainID * integralDComponent + gainDD * rAcc);
 
             // Jerk calculation
-            jerkComponent = (rAcc - rAccLast) / timeStep;
+            jerkComponent = (rAcc - _rAccLast) / _timeStep;
 
-            if (angTol >= Math.Abs(angCommand)) return lastPIDout = 0.0;
+            if (_angTol >= Math.Abs(_angCommand)) return lastPIDout = 0;
 
-            return lastPIDout = Math.Min(Math.Abs(PIDout), Math.PI) * Math.Sign(PIDout); // Preserves the sign of PIDout
+            return lastPIDout = Math.Min(Math.Abs(_PIDout), Math.PI) * Math.Sign(_PIDout); // Preserves the sign of PIDout
 
         }
 
-        void pAdjustment(double targetRVel, bool wasAccel, double timeStep)
-        {
-            //double timeToStop = 0;
-            // Derive the maximum P-gain to not grossly overshoot
-            if (rVel != lastPIDout && rAccAbs > 0 && !goodAverage)
-            {
-                if (!firstStep)
-                { // skip the first step, no acceleration data exists
-                    applyAverage(wasAccel, timeStep);
-                    if (averageCnt > averageCntTarget) goodAverage = true;
-                    averageCnt++;
-                }
-                else firstStep = false;
-            }
-            if (rVel != lastPIDout && rAccAbs > 0 && goodAverage)
-            { // Until testing shows otherwise, torque seems to scale with the command as well as power
-
-                // This is only calculated when we know we were accelerating with the maximum command
-                // and we did not achieve the target speed and so we captured only full acceleration
-                // otherwise we just return the normal PIDout without modifying the gains
-
-                applyAverage(wasAccel, timeStep);
-
-            }
-            if (goodAverage && averageAcc > 0 && averageDec > 0)
-            { // Attempts to dynamically correct for command tracking errors, should account for damping effects (roughly)
-                if (wasAccel)
-                    gainPA = (targetRVel - Math.Abs(rVel)) * lastRAcc / maxAcc;
-                else
-                    gainPD = (targetRVel - Math.Abs(rVel)) * lastRAcc / maxDec;
-            }
+        void pAdjustment(double _targetRVel, bool _wasAccel, double _timeStep)
+        { // Adjust the micro-adjustment P-gain on prediction error
+            // Attempts to dynamically correct for command tracking errors, should account for damping effects (roughly)
+            if (_wasAccel)
+                gainPA = (_targetRVel - Math.Abs(rVel)) * lastRAcc / averageAcc;
+            else
+                gainPD = (_targetRVel - Math.Abs(rVel)) * lastRAcc / averageDec;
             return;
         }
 
-        void applyAverage(bool wasAccel, double timeStep)
+        void applyAverage(bool _wasAccel, double _timeStep)
         {
-            if (wasAccel)
-                averageAcc = (maxAcc * timeAverage + rAccAbs * timeStep) / (timeAverage + timeStep);
+            double _k_prop;
+            int _overrideAccelerationRampFrames;
+            //double _torquePerc;
+
+            _k_prop = (119.0 / (Math.PI * Math.PI / 4.0) + 1.0);
+            _overrideAccelerationRampFrames = (int)(rVel * rVel * _k_prop) + 1;
+            //_torquePerc = Math.Min((lastPIDout - lastRVel) * (60f / (float)_overrideAccelerationRampFrames), 1);
+            // torque ~= (scalar) * (command - actual) / (command-actual)^2 ~= (scalar) / (command - actual) THEREFORE command ~= actual maximizes torque
+            // There is a ceiling however, though it's not achievable on small and fast grids
+            if (_wasAccel)
+                averageAcc = (averageAcc * timeAverage + rAccAbs * _timeStep) / (timeAverage + _timeStep);
             else
-                averageDec = (maxDec * timeAverage + rAccAbs * timeStep) / (timeAverage + timeStep);
+                averageDec = (averageDec * timeAverage + rAccAbs * _timeStep) / (timeAverage + _timeStep);
+        }
+
+        void applyAverageIncrease(bool _wasAccel, double _scale = 1.05)
+        { // Increases the calculated average rapidly until we're now averaging actual values
+            if (_wasAccel)
+                averageAcc *= _scale;
+            else
+                averageDec *= _scale;
+        }
+
+        void timeToTarget(double _angCmnd, double _angVel, out double _timeToTargetFwd, out double _timeToTargetRev)
+        {
+            double _accTimeFwd;
+            double _accTimeRev;
+            double _decTimeFwd;
+            double _decTimeRev;
+            double _accDistFwd;
+            double _accDistRev;
+            double _decDistFwd;
+            double _decDistRev;
+            double _coastDistFwd;
+            double _coastDistRev;
+
+            double _stopDistRev;
+            double _stopDistFwd;
+
+            _accTimeFwd = (Math.PI - Math.Abs(_angVel)) / averageAcc;
+            _accTimeRev = Math.PI / averageAcc;
+            _decTimeFwd = Math.PI / averageDec;
+            _decTimeRev = Math.Abs(_angVel) / averageDec;
+            _accDistFwd = _accTimeFwd * (Math.PI - Math.Abs(_angVel)) / 2.0;
+            _accDistRev = _accTimeRev * Math.PI / 2.0;
+            _decDistFwd = _decTimeFwd * Math.PI / 2.0;
+            _decDistRev = _decTimeRev * Math.Abs(_angVel) / 2.0;
+
+            if (_angCmnd * _angVel > 0) // If we're going forward...
+            {
+                if (_accDistFwd + _decDistFwd > Math.Abs(_angCmnd))
+                { // If we'll never reach maximum speed during the continuation maneuver
+                    _timeToTargetFwd = Math.Abs(_angCmnd) / (_accDistFwd + _decDistFwd) * (_accTimeFwd + _accDistFwd);
+                }
+                else
+                { // We would reach full speed during a continuation maneuver...
+                    _timeToTargetFwd = (Math.Abs(_angCmnd) - (_accDistFwd + _decDistFwd)) / Math.PI + (_accTimeFwd + _decTimeFwd);
+                }
+                if (_decDistFwd + _accDistRev > Math.Abs(_angCmnd))
+                { // First we stop, then we go back, but don't hit max speed while doing so
+                    _timeToTargetRev = _decTimeRev + (_accTimeRev + _decTimeFwd) * (1 + _angCmnd / (_accDistRev + _decDistFwd));
+                }
+                else
+                { // First we stop, then we go back, but hit max speed while doing so
+                    _timeToTargetRev = _decTimeRev + (_decDistRev + Math.Abs(_angCmnd) - (_accDistRev + _decDistFwd)) / Math.PI;
+                }
+            }
         }
     }
 
