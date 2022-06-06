@@ -80,7 +80,7 @@ namespace IngameScript
 
         // Time elements
         double timeStepMin = 1.0 / 60.0; // This is the default for 1 tick
-        double timeToTarget;
+        double timeToReachTarget;
 
         // Output tracker for user to error check
         public double lastPIDout;
@@ -111,8 +111,8 @@ namespace IngameScript
             gainDA = gainDD = 0d;
             jerkComponent = 0d;
             gyroPower = 1.0; // Assume 100% power until the user says otherwise.
-            averageAcc = 1.0;
-            averageDec = 1.0;
+            averageAcc = 12.0;
+            averageDec = 12.0;
             errTolDeg = 0d;
             rAcc = 0d;
             rVel = 0d;
@@ -197,7 +197,7 @@ namespace IngameScript
                 // If we were going to start braking now
                 _timeToStop = Math.Abs(rVel / _useDec);
                 // If we are going to accelerate now
-                _timeToStopFuture = (Math.Abs(rVel + _timeStep / _useAcc) / _useDec)
+                _timeToStopFuture = Math.Abs(rVel + _timeStep / _useAcc) / _useDec;
             }
             else if (rVel > 0.0001f)
             { // If we're moving and can stop in a single tick
@@ -213,7 +213,7 @@ namespace IngameScript
             timeToTarget(_angCommand, _angVel, out _timeToTargetFwd, out _timeToTargetRev);
 
             // Set class parameter in case the user wants it
-            timeToTarget = Math.Min(_timeToTargetFwd, _timeToTargetRev);
+            timeToReachTarget = Math.Min(_timeToTargetFwd, _timeToTargetRev);
 
             if (_timeToTargetFwd > _timeToTargetRev)
             { // Need to reverse direction!
@@ -224,7 +224,7 @@ namespace IngameScript
 
             if (_isFwd)
             {
-                if (timeToTarget > _timeToStop + _timeStep)
+                if (timeToReachTarget > _timeToStop + _timeStep)
                     _isAcceleration = true;
                 else
                     _isAcceleration = false;
@@ -236,7 +236,7 @@ namespace IngameScript
             if (_isAcceleration)
                 // Need to always set a speed slightly higher than we expect to achieve in order to maintain maximum accel
                 _targetRVel = averageAcc * (_timeStep + timeStepMin);
-            else if (_timeToStop < _timeToTarget + _timeStep)
+            else if (_timeToStop < timeToReachTarget + _timeStep)
                 // Need to always set a speed slightly lower than we expect to achieve in order to maintain maximum decel
                 _targetRVel = averageDec * (_timeStep - timeStepMin);
             else// If we are coming to a final stop, don't be aggressive about it, go in by halves.
@@ -277,7 +277,7 @@ namespace IngameScript
                     else if (goodAverage)
                     {
                         // Specifically UpdateOverriddenGyros()
-                        applyAverage(_wasAccel _timeStep);
+                        applyAverage(_wasAccel, _timeStep);
                         pAdjustment(_targetRVel, _wasAccel, _timeStep);
                     }
                     else // If we didn't hit our max acceleration
@@ -348,11 +348,6 @@ namespace IngameScript
             double _accDistRev;
             double _decDistFwd;
             double _decDistRev;
-            double _coastDistFwd;
-            double _coastDistRev;
-
-            double _stopDistRev;
-            double _stopDistFwd;
 
             _accTimeFwd = (Math.PI - Math.Abs(_angVel)) / averageAcc;
             _accTimeRev = Math.PI / averageAcc;
@@ -363,25 +358,23 @@ namespace IngameScript
             _decDistFwd = _decTimeFwd * Math.PI / 2.0;
             _decDistRev = _decTimeRev * Math.Abs(_angVel) / 2.0;
 
-            if (_angCmnd * _angVel > 0) // If we're going forward...
-            {
-                if (_accDistFwd + _decDistFwd > Math.Abs(_angCmnd))
-                { // If we'll never reach maximum speed during the continuation maneuver
-                    _timeToTargetFwd = Math.Abs(_angCmnd) / (_accDistFwd + _decDistFwd) * (_accTimeFwd + _accDistFwd);
-                }
-                else
-                { // We would reach full speed during a continuation maneuver...
-                    _timeToTargetFwd = (Math.Abs(_angCmnd) - (_accDistFwd + _decDistFwd)) / Math.PI + (_accTimeFwd + _decTimeFwd);
-                }
-                if (_decDistFwd + _accDistRev > Math.Abs(_angCmnd))
-                { // First we stop, then we go back, but don't hit max speed while doing so
-                    _timeToTargetRev = _decTimeRev + (_accTimeRev + _decTimeFwd) * (1 + _angCmnd / (_accDistRev + _decDistFwd));
-                }
-                else
-                { // First we stop, then we go back, but hit max speed while doing so
-                    _timeToTargetRev = _decTimeRev + (_decDistRev + Math.Abs(_angCmnd) - (_accDistRev + _decDistFwd)) / Math.PI;
-                }
+            if (_accDistFwd + _decDistFwd > Math.Abs(_angCmnd))
+            { // If we'll never reach maximum speed during the continuation maneuver
+                _timeToTargetFwd = Math.Abs(_angCmnd) / (_accDistFwd + _decDistFwd) * (_accTimeFwd + _accDistFwd);
             }
+            else
+            { // We would reach full speed during a continuation maneuver...
+                _timeToTargetFwd = (Math.Abs(_angCmnd) - (_accDistFwd + _decDistFwd)) / Math.PI + (_accTimeFwd + _decTimeFwd);
+            }
+            if (_decDistFwd + _accDistRev > Math.Abs(_angCmnd))
+            { // First we stop, then we go back, but don't hit max speed while doing so
+                _timeToTargetRev = _decTimeRev + (_accTimeRev + _decTimeFwd) * (1 + _angCmnd / (_accDistRev + _decDistFwd));
+            }
+            else
+            { // First we stop, then we go back, but hit max speed while doing so
+                _timeToTargetRev = _decTimeRev + (_decDistRev + Math.Abs(_angCmnd) - (_accDistRev + _decDistFwd)) / Math.PI;
+            }
+
         }
     }
 
